@@ -1,0 +1,368 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>똥피하기 🍫</title>
+  <style>
+    :root{
+      --bg:#0b1220; --ink:#e5e7eb; --sub:#94a3b8; --brand:#22c55e; --accent:#f59e0b; --danger:#ef4444;
+      --panel:#0f172a; --line:#1f2937;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{margin:0;background:linear-gradient(180deg,#0b1220,#0a0f1a);color:var(--ink);font:600 14px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,Noto Sans KR,sans-serif}
+    .wrap{max-width:960px;margin:0 auto;padding:16px}
+    .card{background:rgba(15,23,42,.7);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:16px;box-shadow:0 12px 24px rgba(0,0,0,.35)}
+    header{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:12px}
+    h1{font-size:16px;margin:0;display:flex;align-items:center;gap:8px}
+    .btn{cursor:pointer;border:1px solid var(--line);background:#111827;color:var(--ink);border-radius:12px;padding:10px 12px;font-weight:700}
+    .btn.primary{background:var(--brand);border-color:var(--brand);color:#03140a}
+    .btn.ghost{background:transparent}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .grid{display:grid;grid-template-columns:1fr;gap:12px}
+    @media(min-width:880px){.grid{grid-template-columns:1fr 320px}}
+    .panel{padding:12px}
+    .meta{display:flex;flex-wrap:wrap;gap:10px;color:var(--sub);font-weight:600}
+    canvas{display:block;width:100%;height:auto;border-radius:12px;background:#0a0f1a}
+    .hint{color:var(--sub);font-weight:600;font-size:12px}
+    .kbd{display:inline-block;border:1px solid #334155;border-bottom-width:3px;border-radius:8px;padding:2px 6px;margin:0 2px;background:#0b1220}
+    .touchCtrls{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px}
+    .touchCtrls button{padding:12px 10px;border-radius:12px;background:#0b1220;border:1px solid #334155;color:#e5e7eb;font-weight:800}
+    .small{font-size:12px;color:var(--sub)}
+    footer{padding:10px 16px;color:var(--sub);font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <header>
+        <h1>똥피하기 <span aria-hidden>💩</span></h1>
+        <div class="meta">
+          <button class="btn primary" id="startBtn">게임 시작</button>
+          <button class="btn" id="pauseBtn" disabled>일시정지</button>
+          <button class="btn ghost" id="resetBtn" disabled>다시하기</button>
+        </div>
+      </header>
+      <div class="grid">
+        <div class="panel">
+          <canvas id="game" width="960" height="540" aria-label="똥피하기 게임" role="img"></canvas>
+        </div>
+        <div class="panel">
+          <div style="display:grid;gap:10px">
+            <div><b>점수:</b> <span id="score">0</span></div>
+            <div><b>최고점수:</b> <span id="best">0</span></div>
+            <div class="hint">조작: <span class="kbd">←</span><span class="kbd">→</span> 또는 <span class="kbd">A</span>/<span class="kbd">D</span>, 점프 <span class="kbd">Space</span>, 일시정지 <span class="kbd">P</span></div>
+            <div class="touchCtrls">
+              <button id="leftBtn">◀︎ 왼쪽</button>
+              <button id="jumpBtn">⤴ 점프</button>
+              <button id="rightBtn">오른쪽 ▶︎</button>
+            </div>
+            <div class="small">모바일 지원. 로컬 저장소에 최고점수만 저장합니다.</div>
+          </div>
+        </div>
+      </div>
+      <footer>© 2025 똥피하기 · 단일 HTML 파일 · 오프라인에서도 실행 가능</footer>
+    </div>
+  </div>
+
+<script>
+(function(){
+  const cvs = document.getElementById('game');
+  const ctx = cvs.getContext('2d');
+  const scoreEl = document.getElementById('score');
+  const bestEl = document.getElementById('best');
+  const startBtn = document.getElementById('startBtn');
+  const pauseBtn = document.getElementById('pauseBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const leftBtn = document.getElementById('leftBtn');
+  const rightBtn = document.getElementById('rightBtn');
+  const jumpBtn = document.getElementById('jumpBtn');
+
+  // DPR 스케일: 선명한 캔버스
+  function fitCanvas(){
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    const rectW = cvs.clientWidth, rectH = cvs.clientHeight;
+    cvs.width = Math.round(rectW * dpr);
+    cvs.height = Math.round(rectH * dpr);
+    ctx.setTransform(dpr,0,0,dpr,0,0);
+  }
+  new ResizeObserver(fitCanvas).observe(cvs);
+  fitCanvas();
+
+  // 게임 상수
+  const W = ()=>cvs.clientWidth, H = ()=>cvs.clientHeight;
+  const GROUND = 60; // 바닥 높이
+
+  const state = {
+    running:false,
+    paused:false,
+    score:0,
+    best: Number(localStorage.getItem('poop_best')||0),
+    time:0,
+    lastTs:0,
+    poops:[],
+    stars:[],
+  };
+  bestEl.textContent = state.best;
+
+  // 플레이어
+  const player = {
+    x: 100, y: 0, w: 44, h: 54,
+    vx: 0, vy: 0,
+    speed: 360, // px/s
+    onGround:false,
+    color:'#22c55e'
+  };
+
+  function resetGame(){
+    state.score = 0; scoreEl.textContent = '0';
+    state.time = 0; state.poops.length = 0; state.stars.length = 0;
+    player.x = W()/2 - player.w/2; player.y = H()-GROUND-player.h; player.vx=0; player.vy=0; player.onGround=true;
+  }
+
+  // 입력
+  const keys = new Set();
+  window.addEventListener('keydown', (e)=>{
+    if(['ArrowLeft','ArrowRight',' ','Space','KeyA','KeyD','KeyP','KeyR'].includes(e.code)) e.preventDefault();
+    if(e.code==='KeyP') togglePause();
+    else if(e.code==='KeyR') start();
+    else keys.add(e.code);
+  });
+  window.addEventListener('keyup', (e)=> keys.delete(e.code));
+
+  // 터치 버튼
+  let leftHeld=false,rightHeld=false;
+  leftBtn.addEventListener('pointerdown', ()=>{leftHeld=true});
+  leftBtn.addEventListener('pointerup', ()=>{leftHeld=false});
+  leftBtn.addEventListener('pointerleave', ()=>{leftHeld=false});
+  rightBtn.addEventListener('pointerdown', ()=>{rightHeld=true});
+  rightBtn.addEventListener('pointerup', ()=>{rightHeld=false});
+  rightBtn.addEventListener('pointerleave', ()=>{rightHeld=false});
+  jumpBtn.addEventListener('click', ()=>jump());
+
+  function jump(){
+    if(player.onGround){
+      player.vy = -520; // 점프 속도
+      player.onGround = false;
+    }
+  }
+
+  function handleInput(dt){
+    player.vx = 0;
+    if(keys.has('ArrowLeft')||keys.has('KeyA')||leftHeld) player.vx -= player.speed;
+    if(keys.has('ArrowRight')||keys.has('KeyD')||rightHeld) player.vx += player.speed;
+    if(keys.has('Space')) jump();
+    player.x += player.vx * dt;
+    player.x = Math.max(0, Math.min(W()-player.w, player.x));
+  }
+
+  // 엔티티
+  function spawnPoop(){
+    const baseSpeed = 160 + state.time*12; // 시간이 지날수록 빨라짐
+    const r = 22 + Math.random()*10;
+    const p = {x: Math.random()*(W()-r*2)+r, y: -40, r, vy: baseSpeed + Math.random()*80, spin: Math.random()*Math.PI*2};
+    state.poops.push(p);
+  }
+  function spawnStar(){
+    // 가끔 점수 보너스 별
+    const s = {x: Math.random()*(W()-20)+10, y:-20, vy: 120 + Math.random()*60, size: 18};
+    state.stars.push(s);
+  }
+
+  let poopTimer = 0, starTimer=0;
+
+  function update(dt){
+    state.time += dt;
+    state.score += dt*10; // 시간당 점수
+    scoreEl.textContent = Math.floor(state.score);
+
+    // 스폰 타이밍: 난이도 상승
+    const poopInterval = Math.max(0.2, 1.2 - state.time*0.03); // 시간이 지날수록 더 자주
+    const starInterval = 3.5 + Math.random()*2.0;
+    poopTimer += dt; starTimer+=dt;
+    if(poopTimer>=poopInterval){ poopTimer=0; spawnPoop(); }
+    if(starTimer>=starInterval){ starTimer=0; if(Math.random()<0.7) spawnStar(); }
+
+    // 중력/이동
+    player.vy += 1500*dt; // 중력
+    player.y += player.vy * dt;
+    const floorY = H()-GROUND-player.h;
+    if(player.y>=floorY){ player.y=floorY; player.vy=0; player.onGround=true; }
+
+    // 똥 이동
+    for(const p of state.poops){ p.y += p.vy*dt; p.spin += dt*3; }
+    state.poops = state.poops.filter(p=>p.y-p.r < H()+40);
+
+    // 별 이동
+    for(const s of state.stars){ s.y += s.vy*dt; }
+    state.stars = state.stars.filter(s=>s.y < H()+30);
+
+    // 충돌 판정
+    for(const p of state.poops){
+      if(rectCircleCollide(player, p)) return gameOver();
+    }
+    for(let i=state.stars.length-1;i>=0;i--){
+      const s = state.stars[i];
+      if(rectPointCollide(player, s.x, s.y)){
+        state.score += 50; state.stars.splice(i,1);
+      }
+    }
+  }
+
+  function rectCircleCollide(rect, circle){
+    const cx = Math.max(rect.x, Math.min(circle.x, rect.x+rect.w));
+    const cy = Math.max(rect.y, Math.min(circle.y, rect.y+rect.h));
+    const dx = circle.x - cx, dy = circle.y - cy;
+    return dx*dx + dy*dy <= circle.r*circle.r;
+  }
+  function rectPointCollide(rect, x, y){
+    return x>=rect.x && x<=rect.x+rect.w && y>=rect.y && y<=rect.y+rect.h;
+  }
+
+  function draw(){
+    // 배경
+    ctx.clearRect(0,0,cvs.width,cvs.height);
+
+    // 별빛 배경 살짝
+    ctx.save();
+    ctx.globalAlpha = .15;
+    for(let i=0;i<40;i++){
+      const x = (i*53.7 + state.time*10) % W();
+      const y = (i*71.2*0.7 + state.time*6) % H();
+      ctx.fillStyle = i%7? '#9ca3af' : '#fbbf24';
+      ctx.fillRect(x,y,2,2);
+    }
+    ctx.restore();
+
+    // 바닥
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(0, H()-GROUND, W(), GROUND);
+    ctx.strokeStyle = '#1f2937';
+    ctx.beginPath(); ctx.moveTo(0,H()-GROUND+0.5); ctx.lineTo(W(), H()-GROUND+0.5); ctx.stroke();
+
+    // 플레이어
+    roundRect(ctx, player.x, player.y, player.w, player.h, 10);
+    ctx.fillStyle = player.color; ctx.fill();
+    // 눈/얼굴
+    ctx.fillStyle = '#052e1b';
+    ctx.fillRect(player.x+10, player.y+16, 6,6); ctx.fillRect(player.x+player.w-16, player.y+16, 6,6);
+    ctx.fillStyle = '#083b23';
+    ctx.fillRect(player.x+14, player.y+30, player.w-28,6);
+
+    // 똥(원 + 이모지)
+    for(const p of state.poops){
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.spin*0.1);
+      ctx.beginPath();
+      ctx.arc(0,0,p.r,0,Math.PI*2);
+      ctx.fillStyle = '#8b5e34';
+      ctx.fill();
+      ctx.font = `${p.r*1.4}px serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('💩', 0, 0);
+      ctx.restore();
+    }
+
+    // 보너스 별
+    for(const s of state.stars){
+      drawStar(ctx, s.x, s.y, s.size, '#fbbf24');
+    }
+
+    // 상단 HUD
+    ctx.fillStyle = 'rgba(0,0,0,.35)';
+    ctx.fillRect(12,12,170,34);
+    ctx.fillStyle = '#e5e7eb';
+    ctx.font = 'bold 16px ui-sans-serif, system-ui';
+    ctx.fillText(`점수 ${Math.floor(state.score)}`, 20, 34);
+
+    // 안내 오버레이
+    if(!state.running){
+      drawCenterText('게임 시작을 누르세요', 'Space / 시작 버튼');
+    } else if(state.paused){
+      drawCenterText('일시정지', 'P / 시작 버튼으로 재개');
+    }
+  }
+
+  function drawCenterText(main, sub){
+    ctx.save();
+    ctx.fillStyle = 'rgba(0,0,0,.45)';
+    ctx.fillRect(0,0,W(),H());
+    ctx.fillStyle = '#e5e7eb';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 28px ui-sans-serif, system-ui';
+    ctx.fillText(main, W()/2, H()/2 - 10);
+    ctx.font = '600 14px ui-sans-serif, system-ui';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(sub, W()/2, H()/2 + 16);
+    ctx.restore();
+  }
+
+  function roundRect(ctx,x,y,w,h,r){
+    ctx.beginPath();
+    ctx.moveTo(x+r,y);
+    ctx.arcTo(x+w,y,x+w,y+h,r);
+    ctx.arcTo(x+w,y+h,x,y+h,r);
+    ctx.arcTo(x,y+h,x,y,r);
+    ctx.arcTo(x,y,x+w,y,r);
+    ctx.closePath();
+  }
+  function drawStar(ctx,cx,cy,sz,color){
+    ctx.save();
+    ctx.translate(cx,cy);
+    ctx.beginPath();
+    for(let i=0;i<5;i++){
+      const a1 = (i*72-90)*Math.PI/180;
+      const a2 = a1 + 36*Math.PI/180;
+      ctx.lineTo(Math.cos(a1)*sz, Math.sin(a1)*sz);
+      ctx.lineTo(Math.cos(a2)*sz*0.5, Math.sin(a2)*sz*0.5);
+    }
+    ctx.closePath();
+    ctx.fillStyle = color; ctx.fill();
+    ctx.restore();
+  }
+
+  function start(){
+    resetGame();
+    state.running = true; state.paused = false;
+    startBtn.disabled = true; pauseBtn.disabled = false; resetBtn.disabled = false;
+  }
+  function togglePause(){
+    if(!state.running) return;
+    state.paused = !state.paused;
+  }
+  function gameOver(){
+    state.running = false; state.paused = false;
+    startBtn.disabled = false; pauseBtn.disabled = true; resetBtn.disabled = false;
+    state.best = Math.max(state.best, Math.floor(state.score));
+    localStorage.setItem('poop_best', state.best);
+    bestEl.textContent = state.best;
+    // 중앙 메시지
+    ctx.save();
+    draw();
+    drawCenterText(`게임 오버 · 점수 ${Math.floor(state.score)}`, '다시하기(R) 또는 시작 버튼');
+    ctx.restore();
+  }
+
+  startBtn.addEventListener('click', ()=>{ if(!state.running) start(); else state.paused=false; });
+  pauseBtn.addEventListener('click', togglePause);
+  resetBtn.addEventListener('click', ()=>{ start(); });
+
+  let raf;
+  function loop(ts){
+    raf = requestAnimationFrame(loop);
+    const dt = Math.min(0.033, (ts - state.lastTs)/1000 || 0);
+    state.lastTs = ts;
+    if(!state.running){ draw(); return; }
+    if(state.paused){ draw(); return; }
+    handleInput(dt);
+    update(dt);
+    draw();
+  }
+  raf = requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
